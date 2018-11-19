@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+from __future__ import print_function
+
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.layers import Conv1D
@@ -11,7 +13,7 @@ import numpy as np
 INPUT_WIDTH = 100
 INPUT_LENGTH = 100
 NO_OF_PATTERNS = 100
-STATE_SIZE = 1
+STATE_SIZE = 2
 PSC_LENGTH = 10
 
 def gen_pattern(n, length, spking_prob=0.1, seed=1):
@@ -30,7 +32,7 @@ class SNNLayer(Layer):
             state[0] = state[0]*tf.sigmoid(2*(0.5-n_output))
 
     def __init__(self, units, psc_length, **kwargs):
-        super().__init__(self, **kwargs)
+        super(SNNLayer, self).__init__(self, **kwargs)
         self.units = units
         self.psc_length = psc_length
 
@@ -55,9 +57,9 @@ class SNNLayer(Layer):
 
     def call(self, inputs, **kwargs):
         # The same PSC is applied to all inputs channels
-        syn_inputs = tf.concat([self.psc(x[:,:,i:i+1]) for i in range(self.INPUT_WIDTH)], axis=-1)
+        syn_inputs = tf.concat([self.psc(inputs[:,:,i:i+1]) for i in range(self.INPUT_WIDTH)], axis=-1)
         # then the RNN units are called
-        o = tf.concat([o for _, o in SNNLayer.InvokeRNN(self.rnn, syn_inputs)], axis=-1)
+        o = tf.stack([o for _, o in SNNLayer.InvokeRNN(self.rnn, syn_inputs)], axis=1)
         return o
 # generated patterns
 g_rng = np.random.RandomState(seed=3000)
@@ -70,17 +72,13 @@ S = tf.Session()
 K.set_session(S)
 
 x = Input((x_train.shape[1], x_train.shape[2]))
-q = SNNLayer(STATE_SIZE, PSC_LENGTH)
-z = q(x)
-
-int_output = [q.output]
-
-z = Reshape((z.shape[1], 1))(z)
+z = SNNLayer(STATE_SIZE, PSC_LENGTH)(x)
+q = SNNLayer(1, PSC_LENGTH)
+z= q(z)
 y = GlobalMaxPooling1D()
 z = y(z)
 
-int_output = int_output + [y.output]
-#int_output = [y.output]
+int_output = [q.output, y.output]
 
 model = Model(x, z)
 model.summary()
@@ -90,4 +88,5 @@ model.compile(loss='binary_crossentropy',
 
 model.fit(x_train, labels, batch_size=50, epochs=300, verbose=1, validation_data=(x_train, labels))
 test_func = K.function([model.input, K.learning_phase()], int_output)
-print(test_func([x_train[2:3] , 0.]))
+outputs = test_func([x_train[2:3] , 0.])
+[print(x[0]) for x in outputs[0][0]]
