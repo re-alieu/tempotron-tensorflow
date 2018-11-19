@@ -10,11 +10,11 @@ import numpy as np
 
 INPUT_WIDTH = 100
 INPUT_LENGTH = 100
-NO_OF_PATTERNS = 500
+NO_OF_PATTERNS = 100
 STATE_SIZE = 1
 PSC_LENGTH = 10
 
-def gen_pattern(n, length, spking_prob=0.03, seed=1):
+def gen_pattern(n, length, spking_prob=0.1, seed=1):
     rng = np.random.RandomState(seed)
     return np.array([rng.binomial(1, spking_prob, n) for _ in range(length)])
 
@@ -24,10 +24,10 @@ class SNNLayer(Layer):
         state = [cell.get_initial_state(inputs, None, None)]
         for i in range(inputs.shape[1]):
             output, state = cell(inputs[:,i,:], state)
-            n_output = tf.sigmoid(output)
+            n_output = tf.sigmoid(3*output)
             yield (output, n_output)
             #refraction period
-            state[0] = tf.math.multiply(state[0], 1-n_output)
+            state[0] = state[0]*tf.sigmoid(2*(0.5-n_output))
 
     def __init__(self, units, psc_length, **kwargs):
         super().__init__(self, **kwargs)
@@ -61,10 +61,10 @@ class SNNLayer(Layer):
         return o
 # generated patterns
 g_rng = np.random.RandomState(seed=3000)
-x_train = np.stack([gen_pattern(INPUT_WIDTH, INPUT_LENGTH,seed=i) for i in g_rng.randint(1e6, size=500)])
+x_train = np.stack([gen_pattern(INPUT_WIDTH, INPUT_LENGTH,seed=i) for i in g_rng.randint(1e6, size=50)])
 print(x_train.shape)
 # assign labels randomly
-labels = g_rng.binomial(1, p=0.1, size=500)
+labels = g_rng.binomial(1, p=0.5, size=50)
 
 S = tf.Session()
 K.set_session(S)
@@ -72,8 +72,15 @@ K.set_session(S)
 x = Input((x_train.shape[1], x_train.shape[2]))
 q = SNNLayer(STATE_SIZE, PSC_LENGTH)
 z = q(x)
+
+int_output = [q.output]
+
 z = Reshape((z.shape[1], 1))(z)
-z = GlobalMaxPooling1D()(z)
+y = GlobalMaxPooling1D()
+z = y(z)
+
+int_output = int_output + [y.output]
+#int_output = [y.output]
 
 model = Model(x, z)
 model.summary()
@@ -81,4 +88,6 @@ model.compile(loss='binary_crossentropy',
     optimizer='rmsprop',
     metrics=['acc'])
 
-model.fit(x_train, labels, batch_size=50, epochs=500, verbose=1, validation_data=(x_train, labels))
+model.fit(x_train, labels, batch_size=50, epochs=300, verbose=1, validation_data=(x_train, labels))
+test_func = K.function([model.input, K.learning_phase()], int_output)
+print(test_func([x_train[2:3] , 0.]))
