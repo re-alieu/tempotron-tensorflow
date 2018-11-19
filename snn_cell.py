@@ -5,13 +5,18 @@ from tensorflow.keras.models import Model
 from tensorflow.layers import Conv1D
 from tensorflow.keras.layers import SimpleRNNCell, RNN, Input, Reshape, Layer
 from tensorflow.keras.layers import GlobalMaxPooling1D
+from tensorflow.keras import backend as K
 import numpy as np
-import csv
 
-INPUT_WDITH = 9
-INPUT_LENGTH = 20
+INPUT_WIDTH = 100
+INPUT_LENGTH = 100
+NO_OF_PATTERNS = 500
 STATE_SIZE = 1
-PSC_LENGTH = 5
+PSC_LENGTH = 10
+
+def gen_pattern(n, length, spking_prob=0.03, seed=1):
+    rng = np.random.RandomState(seed)
+    return np.array([rng.binomial(1, spking_prob, n) for _ in range(length)])
 
 class SNNLayer(Layer):
     @staticmethod
@@ -42,6 +47,7 @@ class SNNLayer(Layer):
             self.psc.build((None, input_shape[1], 1))
             # add psc weights to self
             add_layer(self.psc)
+            self.psc_weights = self.psc.trainable_weights
         # RNN unit, has only 1 unit (one neuron)
         self.rnn = SimpleRNNCell(self.units, activation=None)
         self.rnn.build((None, 1, self.INPUT_WIDTH))
@@ -53,21 +59,19 @@ class SNNLayer(Layer):
         # then the RNN units are called
         o = tf.concat([o for _, o in SNNLayer.InvokeRNN(self.rnn, syn_inputs)], axis=-1)
         return o
-# two toy patterns
-with open('pattern1.csv','r') as f:
-    r=csv.reader(f)
-    pattern1 = [row for row in r]
+# generated patterns
+g_rng = np.random.RandomState(seed=3000)
+x_train = np.stack([gen_pattern(INPUT_WIDTH, INPUT_LENGTH,seed=i) for i in g_rng.randint(1e6, size=500)])
+print(x_train.shape)
+# assign labels randomly
+labels = g_rng.binomial(1, p=0.1, size=500)
 
-with open('pattern2.csv','r') as f:
-    r=csv.reader(f)
-    pattern2 = [row for row in r]
+S = tf.Session()
+K.set_session(S)
 
-x_train = np.stack([pattern1, pattern2])
-# assign labels
-labels = np.array([1, 0])
-
-x = Input((INPUT_LENGTH, INPUT_WDITH,))
-z = SNNLayer(1, 5)(x)
+x = Input((x_train.shape[1], x_train.shape[2]))
+q = SNNLayer(STATE_SIZE, PSC_LENGTH)
+z = q(x)
 z = Reshape((z.shape[1], 1))(z)
 z = GlobalMaxPooling1D()(z)
 
@@ -77,4 +81,4 @@ model.compile(loss='binary_crossentropy',
     optimizer='rmsprop',
     metrics=['acc'])
 
-model.fit(x_train, labels, batch_size=2, epochs=500, verbose=1, validation_data=(x_train, labels))
+model.fit(x_train, labels, batch_size=50, epochs=500, verbose=1, validation_data=(x_train, labels))
